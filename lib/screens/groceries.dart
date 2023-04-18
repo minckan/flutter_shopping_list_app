@@ -1,6 +1,12 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
+import 'package:shpping_list_app/constant/http.dart';
+import 'package:shpping_list_app/data/categories.dart';
 import 'package:shpping_list_app/models/grocery_item.dart';
 import 'package:shpping_list_app/screens/new_item.dart';
+
+import 'package:http/http.dart' as http;
 
 class GroceriesScreen extends StatefulWidget {
   const GroceriesScreen({super.key});
@@ -10,7 +16,62 @@ class GroceriesScreen extends StatefulWidget {
 }
 
 class _GroceriesScreenState extends State<GroceriesScreen> {
-  final List<GroceryItem> groceryItems = [];
+  List<GroceryItem> groceryItems = [];
+  var _isLoading = true;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadItems();
+  }
+
+  void _loadItems() async {
+    final url = Uri.https(HTTP_URL, 'shpping-list.json');
+
+    try {
+      final response = await http.get(url);
+      if (response.statusCode >= 400) {
+        setState(() {
+          _error = 'Failed to fetch data. Please try again later.';
+        });
+        return;
+      }
+
+      if (response.body == 'null') {
+        setState(() {
+          _isLoading = false;
+        });
+        return;
+      }
+
+      final Map<String, dynamic> listData = json.decode(response.body);
+      final List<GroceryItem> loadedItemList = [];
+
+      for (var item in listData.entries) {
+        final category = categories.entries
+            .firstWhere((c) => c.value.title == item.value["category"])
+            .value;
+        loadedItemList.add(
+          GroceryItem(
+            id: item.key,
+            name: item.value["name"],
+            quantity: item.value["quantity"],
+            category: category,
+          ),
+        );
+      }
+      setState(() {
+        groceryItems = loadedItemList;
+        _isLoading = false;
+      });
+    } catch (e) {
+      // throw Exception(e.);
+      setState(() {
+        _error = 'Something went wrong. Please try again later.';
+      });
+    }
+  }
 
   void _addItem(BuildContext context) async {
     final newItem = await Navigator.of(context).push<GroceryItem>(
@@ -20,18 +81,32 @@ class _GroceriesScreenState extends State<GroceriesScreen> {
     );
 
     if (newItem == null) {
-      return null;
+      return;
     }
 
     setState(() {
       groceryItems.add(newItem);
+      _isLoading = false;
     });
   }
 
-  void _removeItem(GroceryItem item) {
+  void _removeItem(GroceryItem item) async {
+    final index = groceryItems.indexOf(item);
     setState(() {
       groceryItems.remove(item);
     });
+
+    final url = Uri.https(
+      "flutter-shopping-list-163b6-default-rtdb.firebaseio.com",
+      'shpping-list/${item.id}.json',
+    );
+    final response = await http.delete(url);
+
+    if (response.statusCode >= 400) {
+      setState(() {
+        groceryItems.insert(index, item);
+      });
+    }
   }
 
   @override
@@ -39,6 +114,12 @@ class _GroceriesScreenState extends State<GroceriesScreen> {
     Widget content = const Center(
       child: Text('No items added yet'),
     );
+
+    if (_isLoading) {
+      content = const Center(
+        child: CircularProgressIndicator(),
+      );
+    }
 
     if (groceryItems.isNotEmpty) {
       content = ListView.builder(
@@ -59,6 +140,10 @@ class _GroceriesScreenState extends State<GroceriesScreen> {
           ),
         ),
       );
+    }
+
+    if (_error != null) {
+      content = Center(child: Text(_error!));
     }
 
     return Scaffold(
